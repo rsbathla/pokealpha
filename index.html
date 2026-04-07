@@ -603,7 +603,12 @@ async function handlePhoto(input) {
         
         const resp = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "anthropic-dangerous-direct-browser-access": "true"
+          },
           body: JSON.stringify({
             model: "claude-sonnet-4-20250514", max_tokens: 500,
             messages: [{ role: "user", content: [
@@ -614,6 +619,12 @@ async function handlePhoto(input) {
         });
         
         const data = await resp.json();
+        if (data.error) {
+          showScanResult("error", "⚠ API error: " + (data.error.message || JSON.stringify(data.error)).slice(0, 100));
+          scanBtn.classList.remove("scanning");
+          document.getElementById("scanLabel").textContent = scanMode === "slab" ? "Scan Slab" : "Scan Card";
+          return;
+        }
         const text = (data.content || []).map(c => c.text || "").join("").replace(/```json|```/g, "").trim();
         const p = JSON.parse(text);
         
@@ -636,7 +647,7 @@ async function handlePhoto(input) {
           showScanResult("success", `✓ ${p.name||"?"} · #${p.cardNumber||"?"} · ${p.set||"?"} · ${p.condition||"?"}`);
         }
       } catch(err) {
-        showScanResult("error", "⚠ Couldn't read card. Fill in manually.");
+        showScanResult("error", "⚠ " + (err.message || "Couldn't read card") + ". Fill in manually.");
       }
       
       scanBtn.classList.remove("scanning");
