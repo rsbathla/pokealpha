@@ -206,6 +206,8 @@
   <section class="view" id="view-src"></section>
   <!-- DATA -->
   <section class="view" id="view-data"></section>
+  <!-- PSA PATHWAY -->
+  <section class="view" id="view-psa"></section>
 </div>
 
 <button class="fab" id="fab" aria-label="Add item">+</button>
@@ -222,6 +224,10 @@
   <button data-tab="src">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
     Sources
+  </button>
+  <button data-tab="psa">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l7 4v6c0 5-3.5 8-7 10-3.5-2-7-5-7-10V6z"/><path d="M9 12l2 2 3-3"/></svg>
+    PSA
   </button>
   <button data-tab="data">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
@@ -1786,7 +1792,7 @@ function wipeAll(){
 /* ============================================================
    NAV / BOOT
    ============================================================ */
-const TAB_TITLES = { dash:"Dashboard", pipe:"Pipeline", src:"Sources", data:"Data" };
+const TAB_TITLES = { dash:"Dashboard", pipe:"Pipeline", src:"Sources", psa:"PSA Pathway", data:"Data" };
 function switchTab(tab){
   document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
   document.getElementById("view-"+tab).classList.add("active");
@@ -1796,6 +1802,7 @@ function switchTab(tab){
   else if(tab==="pipe") renderPipe();
   else if(tab==="src") renderSrc();
   else if(tab==="data") renderData();
+  else if(tab==="psa") renderPSA();
   paintSync();
   window.scrollTo(0,0);
 }
@@ -1806,6 +1813,7 @@ function rerender(){
   else if(id==="pipe") renderPipe();
   else if(id==="src") renderSrc();
   else if(id==="data") renderData();
+  else if(id==="psa") renderPSA();
 }
 
 document.querySelectorAll("nav.bottom button").forEach(b=>{
@@ -1901,6 +1909,102 @@ async function manualPush(){
   setSyncStatus("syncing");
   try{ await ghPush(); toast("Pushed ✓"); setSyncStatus("ok"); }
   catch(e){ console.error(e); toast("Push failed: "+e.message); setSyncStatus("err",e.message); }
+}
+
+/* ============================================================
+   RENDER: PSA PATHWAY  (grading track — bought → at PSA → graded → sold)
+   Added by Claude. Focuses on the ACTIVE grading pipeline; the older
+   eBay→PSA→collectors flips are collapsed under a "Sold" toggle.
+   Quick-add lets you drop in card + price + seller in one line.
+   ============================================================ */
+function inPSAPath(it){
+  // "Just grading": cards on the grading route, or physically at PSA right now.
+  // NOT every slabbed card (a PSA dealer's whole inventory has certs).
+  if(!isCard(it)) return false;
+  return it.route==="grade" || statusOf(it)==="atpsa";
+}
+function psaStage(it){
+  const s=statusOf(it);
+  if(s==="atpsa") return "atpsa";
+  if(s==="sold")  return "sold";
+  if(s==="listed"||s==="consign") return "listed";
+  if(s==="owned") return it.cert ? "back" : "inbound";
+  return "inbound";
+}
+let psaShowSold=false;
+function psaToggleSold(){ psaShowSold=!psaShowSold; renderPSA(); }
+function psaQuickAdd(){
+  const nm=document.getElementById("qa-name");
+  const pr=document.getElementById("qa-price");
+  const sr=document.getElementById("qa-source");
+  const name=(nm.value||"").trim();
+  if(!name){ toast("Enter a card name"); nm.focus(); return; }
+  const it={ id:uid(), kind:"card", name, route:"grade", status:"owned",
+    gradeCo:"PSA", source:(sr.value||"").trim(),
+    purchasePrice: pr.value.trim()? String(num(pr.value)) : "",
+    purchaseDate: new Date().toISOString().slice(0,10), created:Date.now() };
+  state.items.push(it); save();
+  nm.value=""; pr.value=""; sr.value="";
+  toast("✅ Added to PSA pathway"); renderPSA(); nm.focus();
+}
+function renderPSA(){
+  const v=document.getElementById("view-psa");
+  const items=state.items.filter(inPSAPath);
+  const active=items.filter(it=>psaStage(it)!=="sold");
+  const sold=items.filter(it=>psaStage(it)==="sold");
+  const atpsa=items.filter(it=>psaStage(it)==="atpsa");
+  const back=items.filter(it=>psaStage(it)==="back");
+  const inbound=items.filter(it=>psaStage(it)==="inbound");
+  const basis=active.reduce((a,it)=>a+costBasis(it),0);
+  const atpsaVal=atpsa.reduce((a,it)=>a+costBasis(it),0);
+  const backVal=back.reduce((a,it)=>a+costBasis(it),0);
+  const realized=sold.reduce((a,it)=>a+netProfit(it),0);
+
+  const STAGES=[
+    ["inbound","📤 To grade","bought · heading to PSA"],
+    ["atpsa","🏛️ At PSA","in grading / vault"],
+    ["back","✅ Graded · in hand","cert assigned"],
+    ["listed","🏷️ Listed","up for sale"]
+  ];
+  const inp="padding:10px 12px;border-radius:10px;background:var(--card);color:var(--ink);border:1px solid var(--line2);font-size:14px;box-sizing:border-box";
+  let html=`
+    <div class="stats">
+      <div class="stat"><div class="lbl">In pathway</div><div class="val neu">${active.length}</div><div class="sub">${atpsa.length} at PSA · ${inbound.length} inbound</div></div>
+      <div class="stat"><div class="lbl">Capital in flight</div><div class="val neu">${money(basis)}</div><div class="sub">${active.length} unsold</div></div>
+      <div class="stat"><div class="lbl">At PSA now</div><div class="val neu">${atpsa.length}</div><div class="sub">${money(atpsaVal)} cost</div></div>
+      <div class="stat"><div class="lbl">Graded · in hand</div><div class="val neu">${back.length}</div><div class="sub">${money(backVal)} cost</div></div>
+    </div>
+    <div class="note" style="margin-bottom:12px">
+      <div style="font-weight:800;margin-bottom:8px">➕ Quick add to PSA pathway</div>
+      <input id="qa-name" placeholder="Card — e.g. Umbreon Gold Star 1st Ed" style="width:100%;${inp};margin-bottom:8px"/>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="qa-price" inputmode="decimal" placeholder="Paid $" style="flex:1;${inp}"/>
+        <input id="qa-source" placeholder="From (seller)" style="flex:2;${inp}"/>
+      </div>
+      <button class="btn" onclick="psaQuickAdd()">+ Add to pathway</button>
+      <div style="font-size:11.5px;color:var(--muted2);margin-top:8px">Lands in <b>To grade</b>. Grade &amp; cert fill in automatically on the next sync.</div>
+    </div>`;
+  let any=false;
+  STAGES.forEach(([key,label,sub])=>{
+    const rows=items.filter(it=>psaStage(it)===key)
+      .sort((a,b)=> new Date(b.saleDate||b.purchaseDate||0)-new Date(a.saleDate||a.purchaseDate||0));
+    if(!rows.length) return;
+    any=true;
+    const cap=rows.reduce((a,it)=> a+costBasis(it),0);
+    html+=`<div class="section-h">${label} <span style="color:var(--muted2);font-weight:600">· ${rows.length} · ${sub} · ${money(cap)}</span></div>`;
+    html+=`<div class="list">${rows.map(itemRow).join("")}</div>`;
+  });
+  if(!any) html+=`<div class="empty"><div class="big">🏛️</div>No active cards in the PSA pathway yet.<br>Add one above, or tell Claude the card, price and seller.</div>`;
+  if(sold.length){
+    html+=`<div class="note" onclick="psaToggleSold()" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-top:14px">
+      <span style="font-size:12.5px;color:var(--muted2)">🗄️ Sold · ${sold.length} — older eBay→PSA flips${realized?` · net ${money(realized)}`:''}</span>
+      <span style="font-size:12px;color:var(--accent);font-weight:800">${psaShowSold?'hide':'show'}</span></div>`;
+    if(psaShowSold){
+      const rows=sold.slice().sort((a,b)=> new Date(b.saleDate||0)-new Date(a.saleDate||0));
+      html+=`<div class="list">${rows.map(itemRow).join("")}</div>`;
+    }
+  }
+  v.innerHTML=html;
 }
 
 load();
