@@ -406,6 +406,8 @@ function renderDash(){
       </div>
     </div>
 
+    ${typeof splitStrip==="function"?splitStrip(cards):""}
+
     ${ gradingSpend>0 ? `<div class="note" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <span>🏷️ <b>Grading</b> · ${gradingCount} submission${gradingCount===1?'':'s'}${gradingStandalone>0?` · ${grading.length} unmatched`:''}</span>
       <span class="mono" style="color:var(--amber);font-weight:800">${money(gradingSpend)}</span></div>` : "" }
@@ -1909,6 +1911,24 @@ async function manualPush(){
   setSyncStatus("syncing");
   try{ await ghPush(); toast("Pushed ✓"); setSyncStatus("ok"); }
   catch(e){ console.error(e); toast("Push failed: "+e.message); setSyncStatus("err",e.message); }
+}
+
+function splitStrip(cards){
+  if(typeof trackOf!=="function") return "";
+  const F=rollup(cards.filter(it=>trackOf(it)==="flip"));
+  const G=rollup(cards.filter(it=>trackOf(it)==="grade"));
+  const RW=cards.filter(it=>trackOf(it)==="raw");
+  const rwc=RW.reduce((a,it)=>a+costBasis(it),0);
+  const cell=(emo,label,R,view)=>`<div class="stat" style="cursor:pointer" onclick="plView='${view}';switchTab('psa')">
+    <div class="lbl">${emo} ${label} · tap for detail</div>
+    <div class="val ${R.pnl>0?'pos':R.pnl<0?'neg':'neu'}">${money(R.pnl)}</div>
+    <div class="sub">${R.nSold} sold · ${R.nOpen} open · ${money(R.openCost)} tied up · ROI ${R.cost>0?pct(R.roi):"—"}</div></div>`;
+  return `<div class="section-h" style="margin-top:2px">Flips vs Graded</div>
+    <div class="stats" style="grid-template-columns:1fr 1fr">
+      ${cell("💎","FLIPS (bought slabbed)",F,"flip")}
+      ${cell("🏷️","GRADED BY ME (raw → PSA)",G,"grade")}
+    </div>
+    ${RW.length?`<div class="note" style="margin-bottom:12px">📦 ${RW.length} raw not yet submitted · ${money(rwc)} idle</div>`:""}`;
 }
 
 /* ============================================================
